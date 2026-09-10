@@ -104,8 +104,9 @@ document.addEventListener('DOMContentLoaded', () => {
 window.initRideMap = () => {
   const mapElement = document.querySelector('#ride-map, .map');
   if (!mapElement || !window.google?.maps) return;
-  const map = new google.maps.Map(mapElement, { center: { lat: -1.286389, lng: 36.817223 }, zoom: 12, mapTypeControl: false, streetViewControl: false, fullscreenControl: false });
-  new google.maps.Marker({ position: { lat: -1.286389, lng: 36.817223 }, map, title: 'Nairobi pickup area' });
+  const mapCenter = { lat: -1.2520969, lng: 36.846647 };
+  const map = new google.maps.Map(mapElement, { center: mapCenter, zoom: 13, mapTypeControl: false, streetViewControl: false, fullscreenControl: false });
+  new google.maps.Marker({ position: mapCenter, map, title: 'Nairobi pickup area' });
   const pickup = document.querySelector('[name="pickup_label"]');
   const destination = document.querySelector('[name="destination_label"]');
   if (google.maps.places && pickup && destination) {
