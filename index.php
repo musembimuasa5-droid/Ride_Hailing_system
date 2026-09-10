@@ -82,7 +82,108 @@ if ($user && $page === 'dashboard') {
 
 function page_header(string $title): void
 {
-    echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="NiaRide booking and travel management"><title>' . e($title) . ' | ' . APP_NAME . '</title><link rel="stylesheet" href="public/styles.css"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">' . (GOOGLE_MAPS_API_KEY ? '<script src="https://maps.googleapis.com/maps/api/js?key=' . rawurlencode(GOOGLE_MAPS_API_KEY) . '&libraries=places&callback=initRideMap" async defer></script>' : '') . '</head><body>';
+    echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="description" content="NiaRide booking and travel management"><title>' . e($title) . ' | ' . APP_NAME . '</title><link rel="stylesheet" href="public/styles.css"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"><style>
+      .map-panel { padding: 28px; }
+      .map-panel .panel-title { margin-bottom: 16px; }
+      .map-panel .panel-help { margin: 7px 0 0; }
+      .map-panel .panel-title .online-dot {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 10px;
+        border-radius: 999px;
+        background: #effaf1;
+        border: 1px solid rgba(30, 155, 104, 0.18);
+      }
+      .map-panel .panel-title .online-dot i { font-size: 8px; }
+      .map {
+        position: relative;
+        height: 280px;
+        overflow: hidden;
+        border-radius: 16px;
+        border: 1px solid rgba(23, 34, 29, 0.08);
+        background: linear-gradient(135deg, #edf7ee 0%, #dfece4 18%, #d4e8d9 52%, #eef7f1 100%);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
+      }
+      .map::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.54) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.54) 1px, transparent 1px),
+          radial-gradient(circle at 25% 18%, rgba(30, 155, 104, 0.18), transparent 28%),
+          radial-gradient(circle at 75% 32%, rgba(246, 139, 81, 0.18), transparent 22%),
+          linear-gradient(140deg, transparent 0 58%, rgba(25, 58, 41, 0.08) 58% 60%, transparent 60% 100%);
+        background-size: 46px 46px, 46px 46px, 100% 100%, 100% 100%, 100% 100%;
+        opacity: 0.9;
+      }
+      .map::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          radial-gradient(circle at 25% 60%, rgba(255, 255, 255, 0.22), transparent 18%),
+          radial-gradient(circle at 68% 34%, rgba(255, 255, 255, 0.18), transparent 20%),
+          linear-gradient(120deg, rgba(23, 34, 29, 0.04), transparent 32%, rgba(23, 34, 29, 0.06) 66%, transparent 100%);
+      }
+      .map .pin {
+        position: absolute;
+        display: grid;
+        place-items: center;
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        border: 4px solid rgba(255, 255, 255, 0.8);
+        box-shadow: 0 10px 16px rgba(20, 38, 31, 0.2);
+        z-index: 1;
+      }
+      .map .pin::before {
+        content: "";
+        position: absolute;
+        inset: -8px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.22);
+        z-index: -1;
+      }
+      .map .pin i {
+        font-size: 13px;
+        color: #fff;
+      }
+      .map .pin.pickup {
+        left: 22%;
+        top: 58%;
+        background: var(--green);
+      }
+      .map .pin.destination {
+        right: 18%;
+        top: 28%;
+        background: var(--orange);
+      }
+      .map .pin.pickup::after,
+      .map .pin.destination::after {
+        content: "";
+        position: absolute;
+        bottom: -18px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 2px;
+        height: 18px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(23, 34, 29, 0.18));
+      }
+      .map .pin.pickup::after {
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(30, 155, 104, 0.5));
+      }
+      .map .pin.destination::after {
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(246, 139, 81, 0.5));
+      }
+      .panel-link.location-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .panel-link.location-button:hover { color: #177c54; }
+    </style>' . (GOOGLE_MAPS_API_KEY ? '<script src="https://maps.googleapis.com/maps/api/js?key=' . rawurlencode(GOOGLE_MAPS_API_KEY) . '&libraries=places&callback=initRideMap" async defer></script>' : '') . '</head><body>';
 }
 function page_footer(): void
 {
