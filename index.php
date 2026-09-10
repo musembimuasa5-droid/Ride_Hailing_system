@@ -68,6 +68,14 @@ if ($page === 'dashboard' && !$user) {
     $page = 'login';
 }
 
+if ($user && $page === 'dashboard') {
+    $page = match (strtoupper($user['role'] ?? '')) {
+        'ADMIN' => 'admin-dashboard',
+        'DRIVER' => 'driver-dashboard',
+        default => 'dashboard',
+    };
+}
+
 $vehicleTypes = [];
 $fareSettings = [];
 if ($user && $page === 'dashboard') {
@@ -207,6 +215,171 @@ if ($page === 'login' || $page === 'register'):
       <p style="font-size:13px;color:var(--muted);margin-top:25px;text-align:center"><?= $page === 'login' ? 'New to NiaRide? <a style="color:var(--green);font-weight:600" href="?page=register">Create an account</a>' : 'Already have an account? <a style="color:var(--green);font-weight:600" href="?page=login">Sign in</a>' ?></p>
     </section></main>
     <?php page_footer(); exit; endif;
+
+if ($page === 'admin-dashboard'):
+    $user = require_auth();
+    $stats = [
+        'passengers' => db()->query('SELECT COUNT(*) FROM users u JOIN roles r ON r.id = u.role_id WHERE r.name = "PASSENGER" AND u.status = "ACTIVE"')->fetchColumn(),
+        'drivers' => db()->query('SELECT COUNT(*) FROM drivers d JOIN users u ON u.id = d.id WHERE u.status = "ACTIVE"')->fetchColumn(),
+        'active_rides' => db()->query('SELECT COUNT(*) FROM rides WHERE status IN ("SEARCHING_DRIVER", "ACCEPTED", "DRIVER_ARRIVING", "DRIVER_ARRIVED", "IN_PROGRESS")')->fetchColumn(),
+        'completed_payments' => db()->query('SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status = "COMPLETED"')->fetchColumn(),
+    ];
+    $recentRides = db()->query('SELECT r.id, p.full_name AS passenger_name, COALESCE(d.full_name, "Unassigned") AS driver_name, r.status, r.requested_at, r.estimated_fare FROM rides r JOIN users p ON p.id = r.passenger_id LEFT JOIN drivers dr ON dr.id = r.driver_id LEFT JOIN users d ON d.id = dr.id ORDER BY r.requested_at DESC LIMIT 5')->fetchAll();
+    $recentDrivers = db()->query('SELECT u.full_name, d.availability, d.rating FROM drivers d JOIN users u ON u.id = d.id ORDER BY d.rating DESC, u.full_name LIMIT 5')->fetchAll();
+    page_header('Admin Dashboard'); ?>
+<div class="app">
+  <aside class="sidebar" data-sidebar>
+    <div class="brand">nia<span>ride</span></div>
+    <div class="nav-label">Main menu</div>
+    <a class="nav-link active" href="?page=admin-dashboard"><i class="fa-solid fa-house"></i><span>Dashboard</span></a>
+    <a class="nav-link" href="#rides"><i class="fa-solid fa-route"></i><span>Rides</span></a>
+    <a class="nav-link" href="#drivers"><i class="fa-solid fa-user-tie"></i><span>Drivers</span></a>
+    <a class="nav-link" href="#payments"><i class="fa-regular fa-credit-card"></i><span>Payments</span></a>
+    <form method="post" action="?action=logout"><button class="nav-link" style="background:none;border:0;color:inherit;width:100%;text-align:left;font:inherit;cursor:pointer"><i class="fa-solid fa-arrow-right-from-bracket"></i><span>Sign out</span></button></form>
+  </aside>
+  <main class="main">
+    <header class="topbar"><button class="icon-btn menu-btn" data-menu-toggle aria-label="Open navigation"><i class="fa-solid fa-bars"></i></button><span class="topbar-title">Admin workspace</span><div class="topbar-actions"><button class="icon-btn" aria-label="Notifications"><i class="fa-regular fa-bell"></i></button><div class="avatar"><?= e(strtoupper(substr($user['name'], 0, 1))) ?></div></div></header>
+    <div class="content">
+      <div class="hero">
+        <div>
+          <span class="eyebrow">Operations overview</span>
+          <h1>Welcome back, <?= e(explode(' ', $user['name'])[0]) ?>.</h1>
+          <p>Monitor the platform, drivers, fares, and live ride activity.</p>
+        </div>
+        <a class="primary" href="#rides"><i class="fa-solid fa-up-right-from-square"></i>&nbsp; View rides</a>
+      </div>
+      <section class="stats">
+        <article class="stat"><div class="stat-head">Passengers <i class="stat-icon fa-solid fa-users"></i></div><div class="stat-value"><?= e((string) $stats['passengers']) ?></div><div class="stat-note">Active users</div></article>
+        <article class="stat"><div class="stat-head">Drivers <i class="stat-icon fa-solid fa-user-tie"></i></div><div class="stat-value"><?= e((string) $stats['drivers']) ?></div><div class="stat-note">Registered drivers</div></article>
+        <article class="stat"><div class="stat-head">Active rides <i class="stat-icon fa-solid fa-route"></i></div><div class="stat-value"><?= e((string) $stats['active_rides']) ?></div><div class="stat-note">In progress now</div></article>
+        <article class="stat"><div class="stat-head">Revenue <i class="stat-icon fa-solid fa-wallet"></i></div><div class="stat-value">KSh <?= e(number_format((float) $stats['completed_payments'], 0)) ?></div><div class="stat-note">Completed payments</div></article>
+      </section>
+      <div class="dashboard-grid">
+        <section class="panel booking-panel" id="rides">
+          <div class="panel-title"><div><span class="step-count">01</span><h2>Recent rides</h2><p class="panel-help">Latest booking activity across the platform.</p></div></div>
+          <div class="history-list">
+            <?php foreach ($recentRides as $ride): ?>
+              <article class="history-item">
+                <div class="history-main">
+                  <h3><?= e($ride['passenger_name']) ?></h3>
+                  <p><?= e($ride['driver_name']) ?> · <?= e($ride['status']) ?></p>
+                </div>
+                <div class="history-meta">
+                  <span class="rating"><i class="fa-solid fa-clock"></i> <?= e($ride['requested_at']) ?></span>
+                  <span class="status online">KSh <?= e(number_format((float) $ride['estimated_fare'], 0)) ?></span>
+                </div>
+              </article>
+            <?php endforeach; ?>
+          </div>
+        </section>
+        <section class="panel map-panel" id="drivers">
+          <div class="panel-title"><div><span class="step-count">02</span><h2>Driver availability</h2><p class="panel-help">Top drivers by rating and their status.</p></div><span class="online-dot"><i class="fa-solid fa-circle"></i> Live</span></div>
+          <div class="history-list">
+            <?php foreach ($recentDrivers as $driver): ?>
+              <article class="history-item">
+                <div class="history-main">
+                  <h3><?= e($driver['full_name']) ?></h3>
+                  <p><?= e($driver['availability']) ?></p>
+                </div>
+                <div class="history-meta">
+                  <span class="rating"><i class="fa-solid fa-star"></i> <?= e((string) $driver['rating']) ?></span>
+                  <span class="status online"><?= e($driver['availability'] === 'AVAILABLE' ? 'Available' : 'Busy') ?></span>
+                </div>
+              </article>
+            <?php endforeach; ?>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+<?php page_footer(); exit;
+endif;
+
+if ($page === 'driver-dashboard'):
+    $user = require_auth();
+    $driverId = (int) $user['id'];
+    $driverStats = [
+        'assigned' => db()->query('SELECT COUNT(*) FROM rides WHERE driver_id = ' . $driverId)->fetchColumn(),
+        'active' => db()->query('SELECT COUNT(*) FROM rides WHERE driver_id = ' . $driverId . ' AND status IN ("ACCEPTED", "DRIVER_ARRIVING", "DRIVER_ARRIVED", "IN_PROGRESS")')->fetchColumn(),
+        'today_completed' => db()->query('SELECT COUNT(*) FROM rides WHERE driver_id = ' . $driverId . ' AND status = "COMPLETED" AND DATE(completed_at) = CURDATE()')->fetchColumn(),
+        'today_earnings' => db()->query('SELECT COALESCE(SUM(p.amount), 0) FROM rides r JOIN payments p ON p.ride_id = r.id WHERE r.driver_id = ' . $driverId . ' AND p.status = "COMPLETED" AND DATE(p.created_at) = CURDATE()')->fetchColumn(),
+    ];
+    $driverRides = db()->query('SELECT r.id, p.full_name AS passenger_name, r.status, r.pickup_label, r.destination_label, r.estimated_fare FROM rides r JOIN users p ON p.id = r.passenger_id WHERE r.driver_id = ' . $driverId . ' ORDER BY r.requested_at DESC LIMIT 5')->fetchAll();
+    page_header('Driver Dashboard'); ?>
+<div class="app">
+  <aside class="sidebar" data-sidebar>
+    <div class="brand">nia<span>ride</span></div>
+    <div class="nav-label">Main menu</div>
+    <a class="nav-link active" href="?page=driver-dashboard"><i class="fa-solid fa-house"></i><span>Dashboard</span></a>
+    <a class="nav-link" href="#rides"><i class="fa-solid fa-route"></i><span>Trips</span></a>
+    <a class="nav-link" href="#earnings"><i class="fa-solid fa-wallet"></i><span>Earnings</span></a>
+    <form method="post" action="?action=logout"><button class="nav-link" style="background:none;border:0;color:inherit;width:100%;text-align:left;font:inherit;cursor:pointer"><i class="fa-solid fa-arrow-right-from-bracket"></i><span>Sign out</span></button></form>
+  </aside>
+  <main class="main">
+    <header class="topbar"><button class="icon-btn menu-btn" data-menu-toggle aria-label="Open navigation"><i class="fa-solid fa-bars"></i></button><span class="topbar-title">Driver workspace</span><div class="topbar-actions"><button class="icon-btn" aria-label="Notifications"><i class="fa-regular fa-bell"></i></button><div class="avatar"><?= e(strtoupper(substr($user['name'], 0, 1))) ?></div></div></header>
+    <div class="content">
+      <div class="hero">
+        <div>
+          <span class="eyebrow">Driver overview</span>
+          <h1>Good day, <?= e(explode(' ', $user['name'])[0]) ?>.</h1>
+          <p>Your trips, status, and earnings are all in one place.</p>
+        </div>
+        <a class="primary" href="#rides"><i class="fa-solid fa-car-side"></i>&nbsp; Manage trips</a>
+      </div>
+      <section class="stats">
+        <article class="stat"><div class="stat-head">Assigned rides <i class="stat-icon fa-solid fa-route"></i></div><div class="stat-value"><?= e((string) $driverStats['assigned']) ?></div><div class="stat-note">Total trips</div></article>
+        <article class="stat"><div class="stat-head">Active trips <i class="stat-icon fa-solid fa-location-dot"></i></div><div class="stat-value"><?= e((string) $driverStats['active']) ?></div><div class="stat-note">In progress</div></article>
+        <article class="stat"><div class="stat-head">Trips today <i class="stat-icon fa-solid fa-calendar-check"></i></div><div class="stat-value"><?= e((string) $driverStats['today_completed']) ?></div><div class="stat-note">Completed today</div></article>
+        <article class="stat"><div class="stat-head">Earnings today <i class="stat-icon fa-solid fa-wallet"></i></div><div class="stat-value">KSh <?= e(number_format((float) $driverStats['today_earnings'], 0)) ?></div><div class="stat-note">Completed payments</div></article>
+      </section>
+      <div class="dashboard-grid">
+        <section class="panel booking-panel" id="rides">
+          <div class="panel-title"><div><span class="step-count">01</span><h2>Recent rides</h2><p class="panel-help">Trips assigned to you.</p></div></div>
+          <div class="history-list">
+            <?php foreach ($driverRides as $ride): ?>
+              <article class="history-item">
+                <div class="history-main">
+                  <h3><?= e($ride['passenger_name']) ?></h3>
+                  <p><?= e($ride['pickup_label']) ?> → <?= e($ride['destination_label']) ?></p>
+                </div>
+                <div class="history-meta">
+                  <span class="rating"><i class="fa-solid fa-flag"></i> <?= e($ride['status']) ?></span>
+                  <span class="status online">KSh <?= e(number_format((float) $ride['estimated_fare'], 0)) ?></span>
+                </div>
+              </article>
+            <?php endforeach; ?>
+          </div>
+        </section>
+        <section class="panel map-panel" id="earnings">
+          <div class="panel-title"><div><span class="step-count">02</span><h2>Driver status</h2><p class="panel-help">Your current availability.</p></div><span class="online-dot"><i class="fa-solid fa-circle"></i> Online</span></div>
+          <div class="history-list">
+            <article class="history-item">
+              <div class="history-main">
+                <h3>Availability</h3>
+                <p>Ready to accept nearby rides.</p>
+              </div>
+              <div class="history-meta">
+                <span class="status online">Available</span>
+              </div>
+            </article>
+            <article class="history-item">
+              <div class="history-main">
+                <h3>Current rating</h3>
+                <p>Based on recent customer feedback.</p>
+              </div>
+              <div class="history-meta">
+                <span class="rating"><i class="fa-solid fa-star"></i> 4.9</span>
+              </div>
+            </article>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+<?php page_footer(); exit;
+endif;
 
 page_header('Passenger Dashboard'); ?>
 <div class="app">
