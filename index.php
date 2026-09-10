@@ -63,6 +63,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'register') {
     }
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'admin-ride-action') {
+    $currentUser = require_auth();
+    if (($currentUser['role'] ?? '') !== 'ADMIN') {
+        header('Location: ?page=login');
+        exit;
+    }
+    if (!verify_csrf($_POST['csrf'] ?? null)) {
+        header('Location: ?page=admin-dashboard');
+        exit;
+    }
+
+    $rideId = filter_var($_POST['ride_id'] ?? '', FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) ?: null;
+    $driverId = filter_var($_POST['driver_id'] ?? '', FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) ?: null;
+    $status = $_POST['status'] ?? null;
+    $allowedStatuses = ['SEARCHING_DRIVER', 'ACCEPTED', 'DRIVER_ARRIVING', 'DRIVER_ARRIVED', 'IN_PROGRESS', 'COMPLETED', 'NO_DRIVER_AVAILABLE', 'CANCELLED_BY_DRIVER', 'CANCELLED_BY_PASSENGER'];
+
+    if ($rideId && $status && in_array($status, $allowedStatuses, true)) {
+        db()->prepare('UPDATE rides SET status = ?, driver_id = COALESCE(?, driver_id) WHERE id = ?')->execute([$status, $driverId, $rideId]);
+    }
+
+    header('Location: ?page=admin-dashboard');
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'driver-ride-action') {
+    $currentUser = require_auth();
+    if (($currentUser['role'] ?? '') !== 'DRIVER') {
+        header('Location: ?page=login');
+        exit;
+    }
+    if (!verify_csrf($_POST['csrf'] ?? null)) {
+        header('Location: ?page=driver-dashboard');
+        exit;
+    }
+
+    $rideId = filter_var($_POST['ride_id'] ?? '', FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) ?: null;
+    $decision = $_POST['decision'] ?? '';
+
+    if ($rideId && in_array($decision, ['accept', 'reject'], true)) {
+        if ($decision === 'accept') {
+            db()->prepare('UPDATE rides SET status = ? WHERE id = ? AND driver_id = ?')->execute(['ACCEPTED', $rideId, $currentUser['id']]);
+        } else {
+            db()->prepare('UPDATE rides SET status = ?, driver_id = NULL WHERE id = ? AND driver_id = ?')->execute(['NO_DRIVER_AVAILABLE', $rideId, $currentUser['id']]);
+        }
+    }
+
+    header('Location: ?page=driver-dashboard');
+    exit;
+}
+
 $user = current_user();
 if ($page === 'dashboard' && !$user) {
     $page = 'login';
@@ -191,6 +241,32 @@ function page_header(string $title): void
         gap: 8px;
       }
       .panel-link.location-button:hover { color: #177c54; }
+      .table-panel { padding: 28px; }
+      .table-wrap { overflow-x: auto; }
+      .data-table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+      .data-table th, .data-table td { padding: 12px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: middle; }
+      .data-table th { background: #f4f8f5; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+      .data-table tbody tr:last-child td { border-bottom: none; }
+      .data-table tbody tr:hover { background: #f6fbf7; }
+      .status-pill { display: inline-flex; align-items: center; justify-content: center; padding: 6px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: 0.02em; }
+      .status-pill.info { background: #ebf3ff; color: #1e4d8c; }
+      .status-pill.success { background: #eafaf0; color: #177c54; }
+      .status-pill.warning { background: #fff0ea; color: #a85d38; }
+      .inline-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+      .inline-form select, .inline-form button { height: 36px; border-radius: 8px; border: 1px solid var(--line); background: #fff; padding: 0 10px; font: inherit; }
+      .inline-form button.primary.small { padding: 0 14px; }
+      .inline-form button.secondary { background: #fff; color: var(--ink); }
+      .chart-wrap { margin: 18px 0 14px; }
+      .chart-bars { display: grid; grid-template-columns: repeat(auto-fit, minmax(60px, 1fr)); gap: 14px; align-items: end; min-height: 130px; }
+      .chart-column { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+      .chart-bar-bg { width: 100%; height: 110px; background: linear-gradient(180deg, #edf4ef, #e0ecdf); border-radius: 12px; padding: 4px; display: flex; align-items: flex-end; }
+      .chart-bar { display: block; width: 100%; border-radius: 8px; background: linear-gradient(180deg, var(--green), #95cf5d); }
+      .chart-column small { color: var(--muted); font-size: 11px; }
+      .driver-trip-item { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+      .driver-actions { grid-column: 1 / -1; }
+      .driver-actions form { display: flex; gap: 8px; flex-wrap: wrap; }
+      .driver-actions button { background: var(--green); color: #fff; border: none; border-radius: 8px; padding: 10px 14px; font: 600 13px "DM Sans"; cursor: pointer; }
+      .driver-actions button.secondary { background: #fff; color: var(--ink); border: 1px solid var(--line); }
     </style>' . (GOOGLE_MAPS_API_KEY ? '<script src="https://maps.googleapis.com/maps/api/js?key=' . rawurlencode(GOOGLE_MAPS_API_KEY) . '&libraries=places&callback=initRideMap" async defer></script>' : '') . '</head><body>';
 }
 function page_footer(): void
@@ -224,8 +300,9 @@ if ($page === 'admin-dashboard'):
         'active_rides' => db()->query('SELECT COUNT(*) FROM rides WHERE status IN ("SEARCHING_DRIVER", "ACCEPTED", "DRIVER_ARRIVING", "DRIVER_ARRIVED", "IN_PROGRESS")')->fetchColumn(),
         'completed_payments' => db()->query('SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status = "COMPLETED"')->fetchColumn(),
     ];
-    $recentRides = db()->query('SELECT r.id, p.full_name AS passenger_name, COALESCE(d.full_name, "Unassigned") AS driver_name, r.status, r.requested_at, r.estimated_fare FROM rides r JOIN users p ON p.id = r.passenger_id LEFT JOIN drivers dr ON dr.id = r.driver_id LEFT JOIN users d ON d.id = dr.id ORDER BY r.requested_at DESC LIMIT 5')->fetchAll();
-    $recentDrivers = db()->query('SELECT u.full_name, d.availability, d.rating FROM drivers d JOIN users u ON u.id = d.id ORDER BY d.rating DESC, u.full_name LIMIT 5')->fetchAll();
+    $statusSummary = db()->query('SELECT status, COUNT(*) AS total FROM rides GROUP BY status ORDER BY total DESC')->fetchAll();
+    $rideRows = db()->query('SELECT r.id, p.full_name AS passenger_name, COALESCE(d.full_name, "Unassigned") AS driver_name, r.status, r.requested_at, r.estimated_fare, r.pickup_label, r.destination_label FROM rides r JOIN users p ON p.id = r.passenger_id LEFT JOIN drivers dr ON dr.id = r.driver_id LEFT JOIN users d ON d.id = dr.id ORDER BY r.requested_at DESC')->fetchAll();
+    $driverRows = db()->query('SELECT u.id, u.full_name, d.availability, d.rating, COUNT(r.id) AS assigned_rides FROM drivers d JOIN users u ON u.id = d.id LEFT JOIN rides r ON r.driver_id = d.id GROUP BY d.id, u.id, u.full_name, d.availability, d.rating ORDER BY d.rating DESC, u.full_name')->fetchAll();
     page_header('Admin Dashboard'); ?>
 <div class="app">
   <aside class="sidebar" data-sidebar>
@@ -255,38 +332,93 @@ if ($page === 'admin-dashboard'):
         <article class="stat"><div class="stat-head">Revenue <i class="stat-icon fa-solid fa-wallet"></i></div><div class="stat-value">KSh <?= e(number_format((float) $stats['completed_payments'], 0)) ?></div><div class="stat-note">Completed payments</div></article>
       </section>
       <div class="dashboard-grid">
-        <section class="panel booking-panel" id="rides">
-          <div class="panel-title"><div><span class="step-count">01</span><h2>Recent rides</h2><p class="panel-help">Latest booking activity across the platform.</p></div></div>
-          <div class="history-list">
-            <?php foreach ($recentRides as $ride): ?>
-              <article class="history-item">
-                <div class="history-main">
-                  <h3><?= e($ride['passenger_name']) ?></h3>
-                  <p><?= e($ride['driver_name']) ?> · <?= e($ride['status']) ?></p>
+        <section class="panel booking-panel table-panel" id="rides">
+          <div class="panel-title"><div><span class="step-count">01</span><h2>Ride control panel</h2><p class="panel-help">Manage live bookings, driver assignment, and trip status.</p></div></div>
+          <div class="chart-wrap">
+            <div class="chart-bars">
+              <?php foreach ($statusSummary as $summary): ?>
+                <div class="chart-column">
+                  <div class="chart-bar-bg"><span class="chart-bar" style="height: <?= e((string) min(100, max(16, (int) $summary['total'] * 18))) ?>%"></span></div>
+                  <small><?= e(substr($summary['status'], 0, 7)) ?></small>
                 </div>
-                <div class="history-meta">
-                  <span class="rating"><i class="fa-solid fa-clock"></i> <?= e($ride['requested_at']) ?></span>
-                  <span class="status online">KSh <?= e(number_format((float) $ride['estimated_fare'], 0)) ?></span>
-                </div>
-              </article>
-            <?php endforeach; ?>
+              <?php endforeach; ?>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Ride</th>
+                  <th>Passenger</th>
+                  <th>Driver</th>
+                  <th>Status</th>
+                  <th>Fare</th>
+                  <th>Requested</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <?php foreach ($rideRows as $ride): ?>
+                  <tr>
+                    <td>#<?= e((string) $ride['id']) ?></td>
+                    <td><?= e($ride['passenger_name']) ?></td>
+                    <td><?= e($ride['driver_name']) ?></td>
+                    <td><span class="status-pill <?= e($ride['status'] === 'COMPLETED' ? 'success' : ($ride['status'] === 'NO_DRIVER_AVAILABLE' || str_contains($ride['status'], 'CANCELLED') ? 'warning' : 'info')) ?>"><?= e($ride['status']) ?></span></td>
+                    <td>KSh <?= e(number_format((float) $ride['estimated_fare'], 0)) ?></td>
+                    <td><?= e($ride['requested_at']) ?></td>
+                    <td class="table-actions">
+                      <form method="post" action="?action=admin-ride-action" class="inline-form">
+                        <input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>">
+                        <input type="hidden" name="ride_id" value="<?= e((string) $ride['id']) ?>">
+                        <select name="driver_id">
+                          <option value="">Assign driver</option>
+                          <?php foreach ($driverRows as $driver): ?>
+                            <option value="<?= e((string) $driver['id']) ?>"><?= e($driver['full_name']) ?></option>
+                          <?php endforeach; ?>
+                        </select>
+                        <select name="status">
+                          <option value="SEARCHING_DRIVER" <?= $ride['status'] === 'SEARCHING_DRIVER' ? 'selected' : '' ?>>SEARCHING_DRIVER</option>
+                          <option value="ACCEPTED" <?= $ride['status'] === 'ACCEPTED' ? 'selected' : '' ?>>ACCEPTED</option>
+                          <option value="DRIVER_ARRIVING" <?= $ride['status'] === 'DRIVER_ARRIVING' ? 'selected' : '' ?>>DRIVER_ARRIVING</option>
+                          <option value="DRIVER_ARRIVED" <?= $ride['status'] === 'DRIVER_ARRIVED' ? 'selected' : '' ?>>DRIVER_ARRIVED</option>
+                          <option value="IN_PROGRESS" <?= $ride['status'] === 'IN_PROGRESS' ? 'selected' : '' ?>>IN_PROGRESS</option>
+                          <option value="COMPLETED" <?= $ride['status'] === 'COMPLETED' ? 'selected' : '' ?>>COMPLETED</option>
+                          <option value="NO_DRIVER_AVAILABLE" <?= $ride['status'] === 'NO_DRIVER_AVAILABLE' ? 'selected' : '' ?>>NO_DRIVER_AVAILABLE</option>
+                          <option value="CANCELLED_BY_DRIVER" <?= $ride['status'] === 'CANCELLED_BY_DRIVER' ? 'selected' : '' ?>>CANCELLED_BY_DRIVER</option>
+                          <option value="CANCELLED_BY_PASSENGER" <?= $ride['status'] === 'CANCELLED_BY_PASSENGER' ? 'selected' : '' ?>>CANCELLED_BY_PASSENGER</option>
+                        </select>
+                        <button type="submit" class="primary small">Apply</button>
+                      </form>
+                    </td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
           </div>
         </section>
-        <section class="panel map-panel" id="drivers">
-          <div class="panel-title"><div><span class="step-count">02</span><h2>Driver availability</h2><p class="panel-help">Top drivers by rating and their status.</p></div><span class="online-dot"><i class="fa-solid fa-circle"></i> Live</span></div>
-          <div class="history-list">
-            <?php foreach ($recentDrivers as $driver): ?>
-              <article class="history-item">
-                <div class="history-main">
-                  <h3><?= e($driver['full_name']) ?></h3>
-                  <p><?= e($driver['availability']) ?></p>
-                </div>
-                <div class="history-meta">
-                  <span class="rating"><i class="fa-solid fa-star"></i> <?= e((string) $driver['rating']) ?></span>
-                  <span class="status online"><?= e($driver['availability'] === 'AVAILABLE' ? 'Available' : 'Busy') ?></span>
-                </div>
-              </article>
-            <?php endforeach; ?>
+        <section class="panel map-panel table-panel" id="drivers">
+          <div class="panel-title"><div><span class="step-count">02</span><h2>Driver overview</h2><p class="panel-help">Availability, recent rating, and assigned rides.</p></div><span class="online-dot"><i class="fa-solid fa-circle"></i> Live</span></div>
+          <div class="table-wrap">
+            <table class="data-table compact">
+              <thead>
+                <tr>
+                  <th>Driver</th>
+                  <th>Status</th>
+                  <th>Rating</th>
+                  <th>Assigned</th>
+                </tr>
+              </thead>
+              <tbody>
+                <?php foreach ($driverRows as $driver): ?>
+                  <tr>
+                    <td><?= e($driver['full_name']) ?></td>
+                    <td><span class="status-pill <?= e($driver['availability'] === 'AVAILABLE' ? 'success' : 'info') ?>"><?= e($driver['availability']) ?></span></td>
+                    <td><?= e((string) $driver['rating']) ?></td>
+                    <td><?= e((string) $driver['assigned_rides']) ?></td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
           </div>
         </section>
       </div>
@@ -334,11 +466,11 @@ if ($page === 'driver-dashboard'):
         <article class="stat"><div class="stat-head">Earnings today <i class="stat-icon fa-solid fa-wallet"></i></div><div class="stat-value">KSh <?= e(number_format((float) $driverStats['today_earnings'], 0)) ?></div><div class="stat-note">Completed payments</div></article>
       </section>
       <div class="dashboard-grid">
-        <section class="panel booking-panel" id="rides">
-          <div class="panel-title"><div><span class="step-count">01</span><h2>Recent rides</h2><p class="panel-help">Trips assigned to you.</p></div></div>
+        <section class="panel booking-panel table-panel" id="rides">
+          <div class="panel-title"><div><span class="step-count">01</span><h2>Trip queue</h2><p class="panel-help">Review assigned rides and accept or reject them.</p></div></div>
           <div class="history-list">
             <?php foreach ($driverRides as $ride): ?>
-              <article class="history-item">
+              <article class="history-item driver-trip-item">
                 <div class="history-main">
                   <h3><?= e($ride['passenger_name']) ?></h3>
                   <p><?= e($ride['pickup_label']) ?> → <?= e($ride['destination_label']) ?></p>
@@ -347,6 +479,16 @@ if ($page === 'driver-dashboard'):
                   <span class="rating"><i class="fa-solid fa-flag"></i> <?= e($ride['status']) ?></span>
                   <span class="status online">KSh <?= e(number_format((float) $ride['estimated_fare'], 0)) ?></span>
                 </div>
+                <?php if (!in_array($ride['status'], ['COMPLETED', 'NO_DRIVER_AVAILABLE', 'CANCELLED_BY_DRIVER', 'CANCELLED_BY_PASSENGER'], true)): ?>
+                  <div class="driver-actions">
+                    <form method="post" action="?action=driver-ride-action">
+                      <input type="hidden" name="csrf" value="<?= e(csrf_token()) ?>">
+                      <input type="hidden" name="ride_id" value="<?= e((string) $ride['id']) ?>">
+                      <button type="submit" name="decision" value="accept">Accept</button>
+                      <button type="submit" name="decision" value="reject" class="secondary">Reject</button>
+                    </form>
+                  </div>
+                <?php endif; ?>
               </article>
             <?php endforeach; ?>
           </div>
